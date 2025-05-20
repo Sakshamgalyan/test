@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Payment Gateway</title>
+  <link rel="stylesheet" href="checkout.css">
+</head>
+<body>
+  <div class="order-summary">
+    <h2>Order Summary</h2>
+    <p id="order-id">Order ID: Loading...</p>
+    <p id="order-amount">Amount: Loading...</p>
+  </div>
+
+  <div class="payment-form">
+    <h2>Payment Details</h2>
+    <form id="payment-form">
+      <div class="form-group">
+        <label for="card-number">Card Number</label>
+        <input type="text" id="card-number" placeholder="1234 5678 9012 3456" required>
+        <div id="card-number-error" class="error"></div>
+      </div>
+      
+      <div class="form-group">
+        <label for="card-expiry">Expiration Date</label>
+        <input type="text" id="card-expiry" placeholder="MM/YY" required>
+        <div id="card-expiry-error" class="error"></div>
+      </div>
+      
+      <div class="form-group">
+        <label for="card-cvv">CVV</label>
+        <input type="text" id="card-cvv" placeholder="123" required>
+        <div id="card-cvv-error" class="error"></div>
+      </div>
+      
+      <div class="form-group">
+        <label for="card-name">Name on Card</label>
+        <input type="text" id="card-name" placeholder="John Doe" required>
+      </div>
+      
+      <button type="submit" id="pay-button">Pay Now</button>
+      <button type="button" id="cancel-button">Cancel Payment</button>
+    </form>
+  </div>
+  <script src="checkout.js"></script>
+</body>
+</html>
