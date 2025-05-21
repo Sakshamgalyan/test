@@ -1,0 +1,23 @@
+{
+  "name": "Custom Payment Provider",
+  "id": "your-app-id",
+  "version": "1.0.0",
+  "supportedLocales": ["en"],
+  "capabilities": {
+    "payments": {
+      "supported": true,
+      "currencies": ["USD"],
+      "paymentMethods": ["credit_card"],
+      "recurring": false
+    }
+  },
+  "endpoints": {
+    "payment": {
+      "create": "/api/redirect",
+      "capture": "/api/payments/capture",
+      "refund": "/api/payments/refund",
+      "cancel": "/api/payments/cancel"
+    },
+    "callback": "/api/callback"
+  }
+}

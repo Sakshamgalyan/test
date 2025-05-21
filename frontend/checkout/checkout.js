@@ -1,166 +1,136 @@
+const API_URL = 'http://localhost:3000';
+const API_KEY = '93a7fcb2-daf5-46ee-a00f-f6fd272fc522';
 
-// Get payment ID from URL
+// Get URL parameters
 const urlParams = new URLSearchParams(window.location.search);
-const paymentId = urlParams.get('paymentId');
-const token = urlParams.get('token');
+const orderId = urlParams.get('orderId');
+const amount = urlParams.get('amount');
 
-// Fetch payment details from backend
-async function fetchPaymentDetails() {
-    try {
-        const response = await fetch(`/api/payments/${paymentId}`, {
-            headers: {
-                'Authorization': `Bearer ${token}`
-            }
-        });
+// Update order summary
+document.getElementById('order-id').textContent = `Order ID: ${orderId}`;
+document.getElementById('order-amount').textContent = `Amount: $${(amount/100).toFixed(2)}`;
 
-        if (!response.ok) {
-            throw new Error('Failed to fetch payment details');
-        }
-
-        const payment = await response.json();
-
-        // Update UI with order details
-        document.getElementById('order-id').textContent = `Order ID: ${payment.orderId}`;
-        document.getElementById('order-amount').textContent = `Amount: ${payment.currency} ${payment.amount.toFixed(2)}`;
-
-        return payment;
-
-    } catch (error) {
-        console.error('Error fetching payment details:', error);
-        alert('Error loading payment details. Please try again.');
-        // In a real implementation, you might redirect back to Wix with an error
-    }
-}
-
-// Handle form submission
-document.getElementById('payment-form').addEventListener('submit', async (e) => {
-    e.preventDefault();
-
-    // Validate form
-    const cardNumber = document.getElementById('card-number').value;
-    const cardExpiry = document.getElementById('card-expiry').value;
-    const cardCvv = document.getElementById('card-cvv').value;
-    const cardName = document.getElementById('card-name').value;
-
+// Form validation
+function validateCard() {
+    const cardNumber = document.getElementById('card-number').value.replace(/\s/g, '');
+    const expiry = document.getElementById('card-expiry').value;
+    const cvv = document.getElementById('card-cvv').value;
+    
     let isValid = true;
-
-    // Simple validation
-    if (!cardNumber || cardNumber.replace(/\s/g, '').length < 16) {
+    
+    // Card number validation
+    if (!/^\d{16}$/.test(cardNumber)) {
         document.getElementById('card-number-error').textContent = 'Invalid card number';
         isValid = false;
     } else {
         document.getElementById('card-number-error').textContent = '';
     }
-
-    if (!cardExpiry || !cardExpiry.match(/^\d{2}\/\d{2}$/)) {
-        document.getElementById('card-expiry-error').textContent = 'Invalid expiry date (MM/YY)';
+    
+    // Expiry validation
+    if (!/^\d{2}\/\d{2}$/.test(expiry)) {
+        document.getElementById('card-expiry-error').textContent = 'Invalid format (MM/YY)';
         isValid = false;
     } else {
         document.getElementById('card-expiry-error').textContent = '';
     }
-
-    if (!cardCvv || cardCvv.length < 3) {
+    
+    // CVV validation
+    if (!/^\d{3}$/.test(cvv)) {
         document.getElementById('card-cvv-error').textContent = 'Invalid CVV';
         isValid = false;
     } else {
         document.getElementById('card-cvv-error').textContent = '';
     }
+    
+    return isValid;
+}
 
-    if (!isValid) return;
+// Handle payment submission
+document.getElementById('payment-form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    
+    if (!validateCard()) return;
 
-    // Disable button to prevent multiple submissions
-    document.getElementById('pay-button').disabled = true;
-
+    const paymentId = `pay_${Date.now()}`;
+    
     try {
-        // Get payment details
-        const payment = await fetchPaymentDetails();
-
         // Create payment
-        const response = await fetch('/api/payments/create', {
+        const createResponse = await fetch(`${API_URL}/api/payments/create`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${token}`
+                'x-api-key': API_KEY
             },
             body: JSON.stringify({
-                paymentId: payment.paymentId,
-                paymentMethod: 'credit_card',
+                paymentId,
+                orderId,
+                amount: Number(amount),
                 cardDetails: {
-                    number: cardNumber,
-                    expiry: cardExpiry,
-                    cvv: cardCvv,
-                    name: cardName
+                    number: document.getElementById('card-number').value.replace(/\s/g, ''),
+                    expiry: document.getElementById('card-expiry').value,
+                    cvv: document.getElementById('card-cvv').value,
+                    name: document.getElementById('card-name').value
                 }
             })
         });
 
-        if (!response.ok) {
-            throw new Error('Payment failed');
+        const paymentResult = await createResponse.json();
+
+        if (paymentResult.status === 'created') {
+            // Capture payment
+            const captureResponse = await fetch(`${API_URL}/api/payments/capture`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'x-api-key': API_KEY
+                },
+                body: JSON.stringify({
+                    paymentId,
+                    amount: Number(amount)
+                })
+            });
+
+            const captureResult = await captureResponse.json();
+
+            if (captureResult.status === 'captured') {
+                alert('Payment successful!');
+                window.location.href = urlParams.get('successUrl') || '/';
+            } else {
+                throw new Error('Payment capture failed');
+            }
         }
-
-        const result = await response.json();
-        console.log('Payment created:', result);
-
-        // Capture payment (in a real implementation, you might do this after product delivery)
-        const captureResponse = await fetch('/api/payments/capture', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${token}`
-            },
-            body: JSON.stringify({
-                paymentId: payment.paymentId,
-                amount: payment.amount
-            })
-        });
-
-        if (!captureResponse.ok) {
-            throw new Error('Payment capture failed');
-        }
-
-        const captureResult = await captureResponse.json();
-        console.log('Payment captured:', captureResult);
-
-        // Redirect to success page
-        window.location.href = `/api/callback?paymentId=${payment.paymentId}&status=success`;
-
     } catch (error) {
         console.error('Payment error:', error);
-        document.getElementById('pay-button').disabled = false;
-
-        // Redirect to failure page
-        window.location.href = `/api/callback?paymentId=${paymentId}&status=failed`;
+        alert('Payment failed. Please try again.');
     }
 });
 
 // Handle cancel button
-document.getElementById('cancel-button').addEventListener('click', async () => {
-    try {
-        // Cancel payment
-        const response = await fetch('/api/payments/cancel', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${token}`
-            },
-            body: JSON.stringify({
-                paymentId,
-                reason: 'Customer canceled'
-            })
-        });
-
-        if (!response.ok) {
-            throw new Error('Cancel failed');
-        }
-
-        // Redirect to cancel page
-        window.location.href = `/api/callback?paymentId=${paymentId}&status=canceled`;
-
-    } catch (error) {
-        console.error('Cancel error:', error);
-        alert('Failed to cancel payment. Please try again.');
-    }
+document.getElementById('cancel-button').addEventListener('click', () => {
+    const cancelUrl = urlParams.get('cancelUrl') || '/';
+    window.location.href = cancelUrl;
 });
 
-// Initialize page
-fetchPaymentDetails();
+// Format card number with spaces
+document.getElementById('card-number').addEventListener('input', (e) => {
+    let value = e.target.value.replace(/\s/g, '');
+    if (value.length > 16) value = value.substr(0, 16);
+    e.target.value = value.replace(/(\d{4})/g, '$1 ').trim();
+});
+
+// Format expiry date
+document.getElementById('card-expiry').addEventListener('input', (e) => {
+    let value = e.target.value.replace(/\D/g, '');
+    if (value.length > 4) value = value.substr(0, 4);
+    if (value.length > 2) {
+        value = value.substr(0, 2) + '/' + value.substr(2);
+    }
+    e.target.value = value;
+});
+
+// Limit CVV to 3 digits
+document.getElementById('card-cvv').addEventListener('input', (e) => {
+    let value = e.target.value.replace(/\D/g, '');
+    if (value.length > 3) value = value.substr(0, 3);
+    e.target.value = value;
+});
