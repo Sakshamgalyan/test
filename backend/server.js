@@ -8,6 +8,7 @@ const morgan = require('morgan');
 const { validationResult, body } = require('express-validator');
 const cors = require('cors');
 const path = require('path');
+const PaySecureService = require('./services/paysecure');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -113,28 +114,50 @@ app.post('/api/redirect', [
   });
 });
 
-app.post('/api/payments/create', [
-  body('paymentId').notEmpty(),
-  body('cardDetails').isObject()
-], authenticate, (req, res) => {
-  const { paymentId, cardDetails } = req.body;
-  
-  paymentsDb[paymentId] = {
-    id: paymentId,
-    status: 'created',
-    cardDetails: {
-      last4: cardDetails.number.slice(-4),
-      expiry: cardDetails.expiry
-    },
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString()
-  };
+const paySecure = new PaySecureService({
+    apiKey: process.env.PAYSECURE_API_KEY,
+    merchantId: process.env.PAYSECURE_MERCHANT_ID,
+    apiUrl: process.env.PAYSECURE_API_URL
+});
 
-  res.json({
-    paymentId,
-    status: 'created',
-    timestamp: paymentsDb[paymentId].createdAt
-  });
+app.post('/api/payments/create', [
+    body('paymentId').notEmpty(),
+    body('amount').isNumeric(),
+    body('paymentMethod').isIn(['card', 'upi', 'netbanking', 'wallet'])
+], authenticate, async (req, res) => {
+    try {
+        const { paymentId, amount, paymentMethod, customer } = req.body;
+
+        const paySecureResponse = await paySecure.createPayment({
+            amount,
+            currency: 'INR',
+            paymentMethod,
+            orderId: paymentId,
+            customer,
+            callbackUrl: `${process.env.PAYMENT_DOMAIN}/api/callback`,
+            redirectUrl: `${process.env.PAYMENT_DOMAIN}/checkout/result`
+        });
+
+        paymentsDb[paymentId] = {
+            id: paymentId,
+            status: 'created',
+            paySecurePaymentId: paySecureResponse.id,
+            amount,
+            paymentMethod,
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+        };
+
+        res.json({
+            paymentId,
+            status: 'created',
+            redirectUrl: paySecureResponse.redirect_url,
+            timestamp: paymentsDb[paymentId].createdAt
+        });
+    } catch (error) {
+        console.error('Payment creation failed:', error);
+        res.status(500).json({ error: 'Payment creation failed' });
+    }
 });
 
 app.post('/api/payments/capture', [
@@ -208,36 +231,24 @@ app.post('/api/payments/cancel', [
   });
 });
 
-app.post('/api/callback', [
-  body('paymentId').notEmpty(),
-  body('status').isIn(['success', 'failed', 'canceled'])
-], (req, res) => {
-  const { paymentId, status } = req.body;
-  const payment = paymentsDb[paymentId];
+app.post('/api/callback', async (req, res) => {
+    const signature = req.headers['x-paysecure-signature'];
+    
+    if (!paySecure.verifyWebhookSignature(req.body, signature)) {
+        return res.status(403).json({ error: 'Invalid signature' });
+    }
 
-  if (!payment) {
-    return res.status(404).json({ error: 'Payment not found' });
-  }
+    const { payment_id, status, order_id } = req.body;
+    const payment = paymentsDb[order_id];
 
-  const signature = req.headers['x-signature'];
-  const expectedSignature = generateSignature(req.body);
-  
-  if (signature !== expectedSignature) {
-    return res.status(403).json({ error: 'Invalid signature' });
-  }
+    if (!payment) {
+        return res.status(404).json({ error: 'Payment not found' });
+    }
 
-  payment.status = status;
-  payment.updatedAt = new Date().toISOString();
+    payment.status = status;
+    payment.updatedAt = new Date().toISOString();
 
-  const callbackUrl = payment.callbackUrls ? payment.callbackUrls[status] : null;
-  const signedCallbackUrl = callbackUrl ? 
-    `${callbackUrl}&sig=${generateSignature({ paymentId, status })}` : 
-    null;
-
-  res.json({
-    status: 'callback_processed',
-    redirectUrl: signedCallbackUrl
-  });
+    res.json({ status: 'callback_processed' });
 });
 
 app.use((err, req, res, next) => {
